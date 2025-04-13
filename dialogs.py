@@ -39,7 +39,7 @@ class AddMobDialog(tk.Toplevel):
         self.avatar_preview_label = ttk.Label(self)
         self.avatar_preview_label.grid(row=2, column=0, columnspan=2, padx=5, pady=5)
 
-        self.update_avatar_preview(None) # Показать пустой предпросмотр при инициализации
+        self.update_avatar_preview(None)
 
         # --- Кнопки ---
         add_button = ttk.Button(self, text="Добавить", command=self.add_mob)
@@ -53,7 +53,7 @@ class AddMobDialog(tk.Toplevel):
             file_path = os.path.join(self.avatar_dir, selected_file)
             try:
                 img = Image.open(file_path)
-                img.thumbnail((100, 100))  # Уменьшаем размер для предпросмотра
+                img.thumbnail((100, 100))
                 self.current_image = ImageTk.PhotoImage(img)
                 self.avatar_preview_label.config(image=self.current_image)
             except Exception as e:
@@ -99,6 +99,14 @@ class EditMobDialog(tk.Toplevel):
         self.avatar_var = tk.StringVar(self)
         self.current_image = None
         self.selected_avatar_path = initial_avatar_path
+        if initial_avatar_path:
+            initial_avatar_filename = os.path.basename(initial_avatar_path)
+            if initial_avatar_filename in self.avatar_files:
+                self.avatar_var.set(initial_avatar_filename)
+            else:
+                self.avatar_var.set("")
+        else:
+            self.avatar_var.set("")
 
         self.init_ui()
 
@@ -133,12 +141,6 @@ class EditMobDialog(tk.Toplevel):
     def load_initial_avatar(self):
         if self.initial_avatar_path and os.path.exists(self.initial_avatar_path):
             try:
-                avatar_filename = os.path.basename(self.initial_avatar_path)
-                if avatar_filename in self.avatar_files:
-                    self.avatar_var.set(avatar_filename)
-                else:
-                    self.avatar_var.set("") # Или какое-то другое значение по умолчанию
-
                 img = Image.open(self.initial_avatar_path)
                 img.thumbnail((100, 100))
                 self.current_image = ImageTk.PhotoImage(img)
@@ -175,6 +177,10 @@ class EditMobDialog(tk.Toplevel):
         if self.selected_mob_id_for_edit is None:
             messagebox.showerror("Ошибка", "Не выбран моб для редактирования.")
             return
+
+        if self.selected_avatar_path is None and self.initial_avatar_path is not None and self.avatar_var.get() == "":
+            if not messagebox.askyesno("Подтверждение", "Вы уверены, что хотите удалить аватарку у этого моба?"):
+                return
 
         conn = connect_db()
         if conn:
@@ -358,20 +364,25 @@ class DeleteLootDialog(tk.Toplevel):
             messagebox.showerror("Ошибка", "Не выбран лут для удаления.")
             return
 
-        if messagebox.askyesno("Подтверждение", f"Вы уверены, что хотите удалить лут '{selected_loot_name}'?"):
-            conn = connect_db()
-            if conn:
-                try:
-                    cur = conn.cursor()
-                    cur.execute("DELETE FROM mob_loot WHERE loot_id = %s", (self.selected_loot_id_for_delete,))
-                    cur.execute("DELETE FROM loot WHERE id = %s", (self.selected_loot_id_for_delete,))
-                    conn.commit()
-                    messagebox.showinfo("Успех", f"Лут '{selected_loot_name}' успешно удален.")
-                    self.destroy()
-                except psycopg2.Error as e:
-                    messagebox.showerror("Ошибка базы данных", f"Ошибка при удалении лута: {e}")
-                finally:
-                    conn.close()
+        conn = connect_db()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM mob_loot WHERE loot_id = %s", (self.selected_loot_id_for_delete,))
+                linked_mobs_count = cursor.fetchone()[0]
+                if linked_mobs_count > 0:
+                    messagebox.showerror("Ошибка", f"Лут '{selected_loot_name}' связан с {linked_mobs_count} мобами. Пожалуйста, сначала удалите связь с этими мобами в разделе 'Редактировать лут моба'.")
+                    return
+
+                cur = conn.cursor()
+                cur.execute("DELETE FROM loot WHERE id = %s", (self.selected_loot_id_for_delete,))
+                conn.commit()
+                messagebox.showinfo("Успех", f"Лут '{selected_loot_name}' успешно удален.")
+                self.destroy()
+            except psycopg2.Error as e:
+                messagebox.showerror("Ошибка базы данных", f"Ошибка при удалении лута: {e}")
+            finally:
+                conn.close()
 
 class EditMobLootDialog(tk.Toplevel):
     def __init__(self, parent, mobs, refresh_overview_callback, refresh_mob_list_callback, initial_mob_id=None, initial_mob_name=""):

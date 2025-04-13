@@ -4,7 +4,7 @@ from tkinter import messagebox
 from ttkthemes import ThemedTk
 import random
 from database import connect_db, fetch_mobs, get_loot_for_mob
-from dialogs import AddMobDialog, CalculateKillsDialog, EditMobDialog, DeleteMobDialog, AddLootDialog, EditLootDialog, DeleteLootDialog, EditMobLootDialog
+from dialogs import AddMobDialog, CalculateKillsDialog, EditMobDialog, AddLootDialog, EditLootDialog, DeleteLootDialog, EditMobLootDialog
 from PIL import Image, ImageTk
 import os
 
@@ -17,6 +17,7 @@ class LootGeneratorApp:
         self.root.minsize(800, 600)
 
         self.root.set_theme('equilux')
+        self.mob_kills = 0
 
         self.conn = connect_db()
         if not self.conn:
@@ -26,19 +27,19 @@ class LootGeneratorApp:
         self.mob_images = []
         self.selected_mob_index = None
         self.avatar_image_tk = None
-        self.placeholder_avatar_tk = None  # Инициализируем placeholder_avatar_tk
+        self.placeholder_avatar_tk = None
 
-                # --- Секция выбора моба ---
+        # --- Секция выбора моба ---
         mob_frame = ttk.LabelFrame(root, text="Выбор моба", padding=10)
         mob_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         mob_frame.grid_rowconfigure(1, weight=1)
-        mob_frame.grid_columnconfigure(0, weight=0) # Ширина колонки со списком будет определяться виджетом
-        mob_frame.grid_columnconfigure(1, weight=1) # Колонка с аватаркой будет занимать оставшееся пространство
+        mob_frame.grid_columnconfigure(0, weight=0)
+        mob_frame.grid_columnconfigure(1, weight=1)
 
         self.mob_label = ttk.Label(mob_frame, text="Выберите моба:")
         self.mob_label.grid(row=0, column=0, columnspan=2, pady=(0, 5), sticky="w")
 
-        self.mob_listbox = tk.Listbox(mob_frame, height=10, width=20) # Установите желаемую статичную ширину (например, 20 символов)
+        self.mob_listbox = tk.Listbox(mob_frame, height=10, width=20)
         self.mob_listbox.grid(row=1, column=0, padx=(0, 5), pady=5, sticky="nsew")
         self.mob_listbox.bind('<<ListboxSelect>>', self.select_mob_from_listbox)
 
@@ -52,10 +53,17 @@ class LootGeneratorApp:
 
         buttons_subframe = ttk.Frame(mob_frame)
         buttons_subframe.grid(row=2, column=0, columnspan=2, pady=(10, 0), sticky="ew")
+        self.generate_button = ttk.Button(buttons_subframe, text="Ударить моба", command=self.generate_loot)
+        self.hit_random_button = ttk.Button(buttons_subframe, text="Ударить случайного", command=self.hit_random_mob)
+        self.calculate_kills_button = ttk.Button(buttons_subframe, text="Рассчитать кол-во убийств", command=self.open_calculate_kills_dialog)
+
+        self.calculate_kills_button.pack(side=tk.LEFT, padx=5, pady=5, fill="x", expand=True)
+        self.generate_button.pack(side=tk.LEFT, padx=5, pady=5, fill="x", expand=True)
+        self.hit_random_button.pack(side=tk.LEFT, padx=5, pady=5, fill="x", expand=True)
 
         # --- Секция отображения аватарки моба ---
         self.avatar_frame = ttk.LabelFrame(root, text="Аватар", padding=10)
-        self.avatar_frame.grid(row=0, column=1, padx=10, pady=10, sticky="ns") # Растягиваем по вертикали
+        self.avatar_frame.grid(row=0, column=1, padx=10, pady=10, sticky="ns")
 
         self.avatar_label = ttk.Label(self.avatar_frame, text="Нет аватара")
         self.avatar_label.pack(padx=10, pady=10, fill="both", expand=True)
@@ -101,6 +109,8 @@ class LootGeneratorApp:
         self.inventory_tree.pack(padx=10, pady=5, fill="both", expand=True)
 
         self.inventory = {}
+        self.mob_kills_label = ttk.Label(self.inventory_frame, text="Убито мобов: 0")
+        self.mob_kills_label.pack(pady=5)
 
         self.clear_inventory_button = ttk.Button(self.inventory_frame, text="Очистить инвентарь", command=self.clear_inventory)
         self.clear_inventory_button.pack(pady=5)
@@ -111,13 +121,13 @@ class LootGeneratorApp:
         loot_control_frame = ttk.LabelFrame(root, text="Управление лутом", padding=10)
         loot_control_frame.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
 
-        add_loot_button = ttk.Button(loot_control_frame, text="Добавить лут", command=self.open_add_loot_dialog)
+        add_loot_button = ttk.Button(loot_control_frame, text="Добавит", command=self.open_add_loot_dialog)
         add_loot_button.pack(side=tk.LEFT, padx=5, pady=5, fill="x", expand=True)
         edit_loot_button = ttk.Button(loot_control_frame, text="Редактировать лут", command=self.open_edit_loot_dialog)
         edit_loot_button.pack(side=tk.LEFT, padx=5, pady=5, fill="x", expand=True)
         delete_loot_button = ttk.Button(loot_control_frame, text="Удалить лут", command=self.open_delete_loot_dialog)
         delete_loot_button.pack(side=tk.LEFT, padx=5, pady=5, fill="x", expand=True)
-        edit_mob_loot_button = ttk.Button(loot_control_frame, text="Редактировать лут моба", command=self.edit_selected_mob_loot)
+        edit_mob_loot_button = ttk.Button(loot_control_frame, text="Связать лут", command=self.edit_selected_mob_loot)
         edit_mob_loot_button.pack(side=tk.LEFT, padx=5, pady=5, fill="x", expand=True)
 
         # --- Секция обзора лута мобов ---
@@ -175,6 +185,10 @@ class LootGeneratorApp:
 
         self.loot_text.config(state=tk.DISABLED)
         self.update_inventory_display()
+        self.loot_text.config(state=tk.DISABLED)
+        self.update_inventory_display()
+        self.mob_kills += 1
+        self.mob_kills_label.config(text=f"Убито мобов: {self.mob_kills}")
 
     def hit_random_mob(self):
         if not self.mobs:
@@ -182,7 +196,11 @@ class LootGeneratorApp:
             return
 
         random_index = random.randint(0, len(self.mobs) - 1)
-        self.mob_list_select(random_index)
+        self.mob_listbox.selection_clear(0, tk.END)
+        self.mob_listbox.selection_set(random_index)
+        self.mob_listbox.activate(random_index)
+        self.selected_mob_index = random_index
+        self.select_mob_from_listbox(None)
         self.generate_loot()
 
     def open_add_mob_dialog(self):
@@ -225,6 +243,12 @@ class LootGeneratorApp:
                     self.refresh_mob_list()
                     self.populate_loot_overview()
                     self.selected_mob_index = None
+                    if self.mobs:
+                        self.mob_listbox.selection_clear(0, tk.END)
+                        self.mob_listbox.selection_set(0)
+                        self.mob_listbox.activate(0)
+                        self.selected_mob_index = 0
+                        self.select_mob_from_listbox(None)
                 except psycopg2.Error as e:
                     messagebox.showerror("Ошибка базы данных", f"Ошибка при удалении моба: {e}")
                 finally:
@@ -273,6 +297,14 @@ class LootGeneratorApp:
             self.mob_listbox.insert(tk.END, mob_name)
         self.mob_images = []
         self.selected_mob_index = None
+        if self.mobs:
+            self.mob_listbox.selection_set(0)
+            self.mob_listbox.activate(0)
+            self.selected_mob_index = 0
+            self.select_mob_from_listbox(None)
+        else:
+            self.mob_avatar_display_label.config(image=None, text="Нет аватара")
+
     def select_mob_from_listbox(self, event):
         selected_indices = self.mob_listbox.curselection()
         if selected_indices:
@@ -282,13 +314,13 @@ class LootGeneratorApp:
             selected_mob = next((mob for mob in self.mobs if mob[0] == mob_id), None)
             if selected_mob and len(selected_mob) > 2 and selected_mob[2]:
                 avatar_path = selected_mob[2]
-                print(f"Путь к аватарке выбранного моба: {avatar_path}") # Добавили для отладки
+                print(f"Путь к аватарке выбранного моба: {avatar_path}")
                 try:
                     img = Image.open(avatar_path)
-                    img.thumbnail((100, 100)) # Создаем миниатюру размером не более 100x100
+                    img.thumbnail((100, 100))
                     self.avatar_image_tk = ImageTk.PhotoImage(img)
 
-                    self.mob_avatar_display_label.config(image=self.avatar_image_tk, text="") # Отображаем изображение и убираем текст
+                    self.mob_avatar_display_label.config(image=self.avatar_image_tk, text="")
                 except FileNotFoundError:
                     self.mob_avatar_display_label.config(image=None, text="Файл не найден")
                 except Exception as e:
